@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Videollamadas Grupales P2P con Admin</title>
+<!-- CDN de PeerJS y FontAwesome para iconos -->
+<script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+<script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+<style>
+/* Reset básico */
+* {margin:0;padding:0;box-sizing:border-box; font-family: Arial, sans-serif;}
+body {background:#f4f4f4;color:#333;}
+header {background:#4CAF50;color:white;padding:10px;text-align:center;font-size:1.5em;}
+.container {display:flex;height:calc(100vh - 50px);}
+.sidebar {width:250px;background:#2f2f2f;color:white;padding:10px;display:flex;flex-direction:column;}
+.sidebar h2 {margin-bottom:10px;}
+.sidebar button {margin:5px 0;padding:10px;border:none;background:#4CAF50;color:white;cursor:pointer;}
+.sidebar button:hover {background:#45a049;}
+.main {flex:1;display:flex;flex-direction:column;padding:10px;}
+.videos {flex:2;display:flex;flex-wrap:wrap;gap:10px;overflow-y:auto;}
+.videos video {width:300px;height:225px;background:black;}
+.chat-container {flex:1;display:flex;flex-direction:column;margin-top:10px;}
+.chat-messages {flex:1;background:#fff;border:1px solid #ccc;padding:10px;overflow-y:auto;margin-bottom:10px;}
+.chat-input {display:flex;gap:5px;}
+.chat-input input {flex:1;padding:10px;border:1px solid #ccc;border-radius:5px;}
+.chat-input button {padding:10px;border:none;background:#4CAF50;color:white;border-radius:5px;cursor:pointer;}
+.chat-input button:hover {background:#45a049;}
+.user-list {flex:1;background:#333;padding:10px;overflow-y:auto;margin-top:10px;}
+.user-item {display:flex;justify-content:space-between;padding:5px;border-bottom:1px solid #555;}
+.user-item button {background:#f44336;color:white;border:none;padding:5px;cursor:pointer;}
+.user-item button:hover {background:#d32f2f;}
+.modal {position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:none;justify-content:center;align-items:center;}
+.modal-content {background:white;padding:20px;border-radius:10px;width:400px;text-align:center;}
+.modal-content button {margin:10px;padding:10px;cursor:pointer;}
+</style>
+</head>
+<body>
+<header>Videollamadas Grupales P2P con Admin</header>
+<div class="container">
+<div class="sidebar">
+<h2>Admin Panel</h2>
+<button id="btnBanAll">Banear Todos</button>
+<button id="btnExpelAll">Expulsar Todos</button>
+<button id="btnCloseAll">Cerrar Página Todos</button>
+<button id="btnVoteDelete">Votar borrar chat</button>
+<button id="btnPanic">Botón de Pánico</button>
+<h2>Usuarios</h2>
+<div class="user-list" id="userList"></div>
+</div>
+<div class="main">
+<div class="videos" id="videoGrid"></div>
+<div class="chat-container">
+<div class="chat-messages" id="chatMessages"></div>
+<div class="chat-input">
+<input type="text" id="chatInput" placeholder="Escribe un mensaje...">
+<button id="sendBtn">Enviar</button>
+<input type="file" id="fileInput">
+</div>
+</div>
+</div>
+</div>
+<div class="modal" id="modal">
+<div class="modal-content" id="modalContent">
+<p id="modalText">Modal</p>
+<button id="modalClose">Cerrar</button>
+</div>
+</div>
+<script>
+// --- CONFIGURACIÓN PEERJS ---
+const peer = new Peer(undefined, {host:'peerjs-server.herokuapp.com', secure:true, port:443});
+const peers = {};
+let localStream;
+const videoGrid = document.getElementById('videoGrid');
+const myVideo = document.createElement('video');
+myVideo.muted = true;
+
+// --- STREAM LOCAL ---
+navigator.mediaDevices.getUserMedia({video:true, audio:true}).then(stream => {
+    localStream = stream;
+    addVideoStream(myVideo, stream);
+    peer.on('call', call => {
+        call.answer(stream);
+        const video = document.createElement('video');
+        call.on('stream', userVideoStream => {
+            addVideoStream(video, userVideoStream);
+        });
+    });
+});
+
+peer.on('open', id => {
+    socket.emit('join-room', ROOM_ID, id);
+});
+
+// --- SOCKET SIMULADO ---
+const socket = {callbacks:{}, emit:(event, ...args)=>{
+    if(socket.callbacks[event]) socket.callbacks[event].forEach(cb=>cb(...args));
+}, on:(event, cb)=>{
+    if(!socket.callbacks[event]) socket.callbacks[event]=[];
+    socket.callbacks[event].push(cb);
+}};
+
+// --- MANEJO DE USUARIOS ---
+const userList = document.getElementById('userList');
+function addUser(id){
+    const div = document.createElement('div');
+    div.classList.add('user-item');
+    div.id = 'user-'+id;
+    div.innerHTML = `<span>${id}</span><button onclick="expelUser('${id}')">Expulsar</button>`;
+    userList.appendChild(div);
+}
+function removeUser(id){
+    const el = document.getElementById('user-'+id);
+    if(el) el.remove();
+}
+function expelUser(id){
+    removeUser(id);
+    socket.emit('expel-user', id);
+}
+
+// --- VIDEOS ---
+function addVideoStream(video, stream){
+    video.srcObject = stream;
+    video.addEventListener('loadedmetadata', ()=>{
+        video.play();
+    });
+    videoGrid.append(video);
+}
+
+// --- CHAT ---
+const chatMessages = document.getElementById('chatMessages');
+document.getElementById('sendBtn').addEventListener('click', ()=>{
+    const msg = document.getElementById('chatInput').value;
+    appendMessage('Yo', msg);
+    socket.emit('chat-message', msg);
+    document.getElementById('chatInput').value = '';
+});
+function appendMessage(user, msg){
+    const div = document.createElement('div');
+    div.textContent = `${user}: ${msg}`;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// --- BOTÓN DE PÁNICO ---
+document.getElementById('btnPanic').addEventListener('click', ()=>{
+    alert('¡Botón de pánico activado!');
+});
+
+// --- VOTAR BORRAR CHAT ---
+document.getElementById('btnVoteDelete').addEventListener('click', ()=>{
+    chatMessages.innerHTML='';
+    alert('Se ha votado para borrar la conversación');
+});
+
+// --- MODAL ---
+const modal = document.getElementById('modal');
+const modalText = document.getElementById('modalText');
+const modalClose = document.getElementById('modalClose');
+modalClose.addEventListener('click', ()=>{ modal.style.display='none'; });
+function showModal(msg){
+    modalText.textContent = msg;
+    modal.style.display='flex';
+}
+
+// --- BOTONES ADMIN ---
+document.getElementById('btnBanAll').addEventListener('click', ()=>{
+    userList.innerHTML='';
+    alert('Todos los usuarios han sido baneados');
+});
+document.getElementById('btnExpelAll').addEventListener('click', ()=>{
+    userList.innerHTML='';
+    alert('Todos los usuarios han sido expulsados');
+});
+document.getElementById('btnCloseAll').addEventListener('click', ()=>{
+    alert('Se cerrará la página para todos');
+    window.close();
+});
+
+// --- SIMULACIÓN DE USUARIOS ---
+for(let i=1;i<=5;i++) addUser('Usuario'+i);
+
+// --- ARCHIVOS ---
+document.getElementById('fileInput').addEventListener('change', e=>{
+    const file = e.target.files[0];
+    appendMessage('Yo', `Archivo enviado: ${file.name}`);
+});
+
+</script>
+</body>
+</html>
